@@ -35,6 +35,8 @@
     deletedUndo: null,
     history: { undo: [], redo: [], limit: 10, inputSnapshot: null, isRestoring: false },
     drag: null,
+    autoScroll: null,
+    duplicatePrompt: null,
     suppressNextClick: false
   };
 
@@ -198,6 +200,7 @@
     }
     if (element.type === 'formula') {
       element.formula = normalizeFormula(element.formula || { operator: 'chain', inputs: [] });
+      if (typeof element.hideName === 'undefined') element.hideName = false;
       if (!element.valueType || element.valueType === 'date') element.valueType = 'number';
       if (element.valueType === 'weight' && !element.unit) element.unit = 'g';
       if (element.unit === 'Tonnen') element.unit = 't';
@@ -228,6 +231,8 @@
     inputs.forEach(function (ref, index) {
       if (!ref.op) ref.op = index ? 'add' : 'start';
       if (index === 0) ref.op = 'start';
+      if (!ref.elementId && ref.kind !== 'value') ref.kind = 'value';
+      if (ref.kind === 'value' && typeof ref.value === 'undefined') ref.value = 0;
     });
     formula.inputs = inputs;
     return formula;
@@ -235,7 +240,7 @@
 
   function render() {
     document.body.classList.toggle('theme-light', state.doc.settings.theme === 'light');
-    app.innerHTML = (state.currentPageId ? renderPage() : renderHome()) + renderToolbar() + renderSheet() + renderToast();
+    app.innerHTML = (state.currentPageId ? renderPage() : renderHome()) + renderDuplicatePrompt() + renderToolbar() + renderSheet() + renderToast();
     resizeTextareas();
     refreshResults();
     syncToolbarClass();
@@ -286,16 +291,23 @@
     }
     var isEdit = getPageMode(page) === 'edit';
     var sections = pageSections(page);
-    var html = '<main class="screen page-screen" style="--page-color:' + attr(page.color || COLORS[0]) + '">';
+    var draggingSectionId = state.drag && state.drag.kind === 'section' ? state.drag.sectionId : null;
+    var sectionDropIndex = 0;
+    var html = '<main class="screen page-screen ' + (isEdit ? 'is-edit' : 'is-fill') + '" style="--page-color:' + attr(page.color || COLORS[0]) + '">';
     html += '<header class="topbar"><div>' + iconButton('back-home', '‹', 'Zurück') + '</div><div class="page-mode"><button class="mode-button ' + (!isEdit ? 'is-active' : '') + '" data-action="set-mode" data-mode="fill">Ausfüllen</button><button class="mode-button ' + (isEdit ? 'is-active' : '') + '" data-action="set-mode" data-mode="edit">Bearbeiten</button></div><div>' + iconButton('open-menu', '☰', 'Menü') + '</div></header>';
     if (isEdit) {
       html += '<div class="page-name-strip"><button class="page-icon-edit" data-action="open-page-settings">' + esc(page.icon || '📄') + '</button><input class="page-name-input" data-field="page-name" value="' + attr(page.name || '') + '" placeholder="Neue Seite" /></div>';
     }
     html += '<section class="section-stack">';
     if (!sections.length && isEdit) html += renderLinePlus('add-section', page.id, 'Bereich');
+    if (sections.length && isEdit) html += renderSectionDropMarker(0);
     sections.forEach(function (section) {
       html += renderSection(section, isEdit);
-      if (isEdit) html += renderLinePlus('add-section', page.id, 'Bereich');
+      if (section.id !== draggingSectionId) {
+        sectionDropIndex += 1;
+        if (isEdit) html += renderSectionDropMarker(sectionDropIndex);
+      }
+      if (isEdit && section.id !== draggingSectionId) html += renderLinePlus('add-section', page.id, 'Bereich');
     });
     html += '</section></main>';
     return html;
@@ -303,7 +315,8 @@
 
   function renderSection(section, isEdit) {
     var elements = sectionElements(section);
-    var html = '<section class="calc-section" data-section-id="' + attr(section.id) + '" style="--section-color:' + attr(section.color || COLORS[0]) + '">';
+    var dragging = state.drag && state.drag.kind === 'section' && state.drag.sectionId === section.id;
+    var html = '<section class="calc-section ' + (dragging ? 'is-dragging-section' : '') + '" data-section-id="' + attr(section.id) + '" style="--section-color:' + attr(section.color || COLORS[0]) + '">';
     html += '<button class="section-rail" data-action="select-section" data-id="' + attr(section.id) + '" title="Bereich"></button><div class="section-panel">';
     html += '<button class="section-title ' + (isEdit ? 'can-edit' : '') + (!section.name ? ' is-placeholder' : '') + '" data-action="select-section" data-id="' + attr(section.id) + '">' + esc(section.name || 'Neuer Bereich') + '</button>';
     if (isEdit && state.activeSectionId === section.id) html += renderSectionEditor(section);
@@ -334,8 +347,13 @@
   }
 
   function renderDropMarker(sectionId, index) {
-    var active = state.drag && state.drag.overSectionId === sectionId && state.drag.overIndex === index;
+    var active = state.drag && state.drag.kind === 'element' && state.drag.overSectionId === sectionId && state.drag.overIndex === index;
     return '<span class="drop-marker ' + (active ? 'is-active' : '') + '" data-drop-section="' + attr(sectionId) + '" data-drop-index="' + index + '"></span>';
+  }
+
+  function renderSectionDropMarker(index) {
+    var active = state.drag && state.drag.kind === 'section' && state.drag.overSectionIndex === index;
+    return '<div class="section-drop-marker ' + (active ? 'is-active' : '') + '" data-section-drop-index="' + index + '"></div>';
   }
 
   function renderElementChip(element, isEdit) {
@@ -346,7 +364,8 @@
     if (element.type === 'number' && element.stepper) {
       html += '<span>' + esc(label) + '</span><span class="stepper"><span>▴</span><span>▾</span></span>';
     } else if (element.type === 'formula') {
-      html += '<span>' + esc(element.name || 'Formel') + '</span><strong data-result-for="' + attr(element.id) + '">' + esc(formatComputation(element, computeElement(element.id, []))) + '</strong>';
+      if (!element.hideName) html += '<span>' + esc(element.name || 'Formel') + '</span>';
+      html += '<strong data-result-for="' + attr(element.id) + '">' + esc(formatComputation(element, computeElement(element.id, []))) + '</strong>';
     } else {
       html += esc(label || 'Text');
     }
@@ -405,6 +424,7 @@
     html += '<label class="field">Ergebnis<input class="input" readonly value="' + attr(formatComputation(element, computeElement(element.id, []))) + '" /></label></div>';
     if (isEdit) {
       html += '<div class="grid-two"><label class="field">Rechnung' + renderSelect('formula-operator', element.id, element.formula.operator || 'chain', FORMULA_MODES) + '</label><label class="field">Format' + renderSelect('formula-value-type', element.id, element.valueType || 'number', FORMULA_VALUE_TYPES) + '</label></div>';
+      html += '<label class="field checkbox-field"><span><input type="checkbox" data-field="formula-hide-name" data-id="' + attr(element.id) + '" ' + (element.hideName ? 'checked' : '') + ' /> Namen ausblenden</span></label>';
       if (element.valueType === 'currency') html += '<label class="field">Währung' + renderSelect('element-currency', element.id, element.currency || 'EUR', listToOptions(CURRENCIES)) + '</label>';
       if (element.valueType === 'weight') html += '<label class="field">Einheit' + renderSelect('element-unit', element.id, element.unit || 'g', WEIGHT_UNITS) + '</label>';
       html += renderFormulaRefs(element);
@@ -430,8 +450,14 @@
       } else {
         html += renderRefOpSelect(element.id, index, ref.op || 'add');
       }
-      html += '<span>' + esc(source && !source.deletedAt ? elementLabel(source) : 'Fehlt') + '<br><span class="ref-sub">' + esc(page ? page.name : 'Seite fehlt') + '</span></span><button class="mini-button" data-action="remove-ref" data-id="' + attr(element.id) + '" data-index="' + index + '">×</button></div>';
+      if (isFormulaValueInput(ref)) {
+        html += '<label class="inline-value"><span>Feste Zahl</span><input class="input compact-input" data-field="formula-constant-value" data-id="' + attr(element.id) + '" data-index="' + index + '" type="number" step="any" inputmode="decimal" value="' + attr(ref.value || ref.value === 0 ? ref.value : 0) + '" /></label>';
+      } else {
+        html += '<span>' + esc(source && !source.deletedAt ? elementLabel(source) : 'Fehlt') + '<br><span class="ref-sub">' + esc(page ? page.name : 'Seite fehlt') + '</span></span>';
+      }
+      html += '<button class="mini-button" data-action="remove-ref" data-id="' + attr(element.id) + '" data-index="' + index + '">×</button></div>';
     });
+    html += '<button class="text-button" data-action="add-formula-constant" data-id="' + attr(element.id) + '">Feste Zahl hinzufügen</button>';
     html += '</div>';
     return html;
   }
@@ -467,6 +493,11 @@
   function renderToolbar() {
     if (!state.currentPageId) return '';
     return '<nav class="keyboard-toolbar" role="toolbar" aria-label="Schnellleiste"><button class="toolbar-button" data-action="history-undo" title="Rückgängig">↶</button><button class="toolbar-button" data-action="history-redo" title="Wiederholen">↷</button><button class="toolbar-button" data-action="hide-keyboard" title="Tastatur schließen">⌄</button></nav>';
+  }
+
+  function renderDuplicatePrompt() {
+    if (!state.duplicatePrompt) return '';
+    return '<div class="duplicate-popover" style="--dup-x:' + attr(state.duplicatePrompt.x) + 'px; --dup-y:' + attr(state.duplicatePrompt.y) + 'px"><button class="duplicate-button" data-action="confirm-duplicate">Duplizieren</button></div>';
   }
 
   function renderSheet() {
@@ -527,16 +558,26 @@
   }
 
   function handleClick(event) {
-    if (state.suppressNextClick) {
+    var target = event.target.closest('[data-action]');
+    var action = target ? target.dataset.action : '';
+    if (state.suppressNextClick && !(state.duplicatePrompt && action === 'confirm-duplicate')) {
+      if (!state.suppressClickUntil || Date.now() < state.suppressClickUntil) {
+        event.preventDefault();
+        return;
+      }
       state.suppressNextClick = false;
+    }
+    state.suppressNextClick = false;
+    if (state.duplicatePrompt && action !== 'confirm-duplicate') {
+      state.duplicatePrompt = null;
       event.preventDefault();
+      render();
       return;
     }
-    var target = event.target.closest('[data-action]');
     if (!target) return;
-    var action = target.dataset.action;
     if (action === 'close-sheet' && target.classList.contains('sheet-backdrop') && event.target !== target) return;
     event.preventDefault();
+    if (action === 'confirm-duplicate') return confirmDuplicate();
     if (action === 'toggle-theme') return toggleTheme();
     if (action === 'add-folder') return addFolder();
     if (action === 'toggle-folder') return toggleFolder(target.dataset.id);
@@ -562,6 +603,7 @@
     if (action === 'history-redo') return redoHistory();
     if (action === 'undo-delete') return undoDelete();
     if (action === 'add-ref') return addFormulaRef(target.dataset.id, target.dataset.sourceId);
+    if (action === 'add-formula-constant') return addFormulaConstant(target.dataset.id);
     if (action === 'remove-ref') return removeFormulaRef(target.dataset.id, Number(target.dataset.index));
     if (action === 'set-page-emoji') return setPageEmoji(target.dataset.emoji);
     if (action === 'set-page-color') return setPageColor(target.dataset.color);
@@ -571,7 +613,7 @@
   }
 
   function handleContextMenu(event) {
-    if (event.target.closest('[data-element-id], .section-title, .section-rail')) event.preventDefault();
+    if (event.target.closest('[data-element-id], .section-title, .section-rail, .calc-section')) event.preventDefault();
   }
 
   function handleSelectStart(event) {
@@ -590,6 +632,10 @@
     if (field === 'element-name') element.name = target.value;
     if (field === 'element-text') element.text = target.value;
     if (field === 'element-value') element.value = element.valueType === 'date' ? target.value : parseNumber(target.value);
+    if (field === 'formula-constant-value' && element.formula && element.formula.inputs[target.dataset.index]) {
+      element.formula.inputs[target.dataset.index].kind = 'value';
+      element.formula.inputs[target.dataset.index].value = parseNumber(target.value);
+    }
     touch(element);
     saveDocument();
     if (field === 'element-text') resizeTextarea(target);
@@ -617,6 +663,7 @@
     if (field === 'element-currency') element.currency = target.value;
     if (field === 'element-unit') element.unit = target.value;
     if (field === 'element-stepper') element.stepper = target.checked;
+    if (field === 'formula-hide-name') element.hideName = target.checked;
     if (field === 'formula-operator') element.formula.operator = target.value;
     if (field === 'formula-ref-op' && element.formula && element.formula.inputs[target.dataset.index]) {
       element.formula.inputs[target.dataset.index].op = target.value;
@@ -669,8 +716,8 @@
     render();
   }
 
-  function openPage(id) { state.currentPageId = id; state.sheet = null; state.activeElementId = null; state.activeSectionId = null; state.activeSectionColorId = null; render(); }
-  function goHome() { state.currentPageId = null; state.sheet = null; state.activeElementId = null; state.activeSectionId = null; state.activeSectionColorId = null; render(); }
+  function openPage(id) { state.currentPageId = id; state.sheet = null; state.duplicatePrompt = null; state.activeElementId = null; state.activeSectionId = null; state.activeSectionColorId = null; render(); }
+  function goHome() { state.currentPageId = null; state.sheet = null; state.duplicatePrompt = null; state.activeElementId = null; state.activeSectionId = null; state.activeSectionColorId = null; render(); }
   function toggleTheme() { state.doc.settings.theme = state.doc.settings.theme === 'dark' ? 'light' : 'dark'; saveDocument(); render(); }
   function setMode(mode) { var page = currentPage(); if (!page) return; state.modeByPage[page.id] = mode; state.sheet = null; if (mode !== 'edit') { state.activeSectionId = null; state.activeSectionColorId = null; } render(); }
   function openSheet(sheet) { state.sheet = sheet; render(); }
@@ -824,6 +871,17 @@
     render();
   }
 
+  function addFormulaConstant(formulaId) {
+    var formula = state.doc.elements[formulaId];
+    if (!formula || formula.type !== 'formula') return;
+    formula.formula.inputs = formula.formula.inputs || [];
+    commitHistory();
+    formula.formula.inputs.push({ kind: 'value', value: 1, op: formula.formula.inputs.length ? 'multiply' : 'start' });
+    touch(formula);
+    saveDocument();
+    render();
+  }
+
   function removeFormulaRef(formulaId, index) {
     var formula = state.doc.elements[formulaId];
     if (!formula || !formula.formula) return;
@@ -960,6 +1018,7 @@
     if (event.button && event.button !== 0) return;
     if (getPageMode(currentPage()) !== 'edit') return;
     if (isInput(event.target) || event.target.closest('.mini-button, .round-plus, .line-plus-button, .color-chip, .element-popover, .section-editor')) return;
+    state.duplicatePrompt = null;
     var chip = event.target.closest('[data-element-id]');
     var sectionNode = event.target.closest('.calc-section');
     var sectionControl = event.target.closest('.section-title, .section-rail') || (!chip && sectionNode ? sectionNode : null);
@@ -981,8 +1040,11 @@
       sourceSectionId: element ? element.sectionId : (section ? section.id : null),
       startX: event.clientX,
       startY: event.clientY,
+      lastX: event.clientX,
+      lastY: event.clientY,
       overSectionId: element ? element.sectionId : (section ? section.id : null),
       overIndex: 0,
+      overSectionIndex: section ? pageSections(currentPage()).filter(function (item) { return item.id !== section.id; }).length : 0,
       timer: window.setTimeout(function () {
         markLongPress();
       }, 420)
@@ -997,13 +1059,18 @@
     var dx = Math.abs(event.clientX - state.drag.startX);
     var dy = Math.abs(event.clientY - state.drag.startY);
     if (state.drag.pending && (dx > 10 || dy > 10)) return cancelDrag();
-    if (state.drag.longPressed && state.drag.kind === 'section' && (dx > 12 || dy > 12)) return cancelDrag();
+    state.drag.lastX = event.clientX;
+    state.drag.lastY = event.clientY;
     if (state.drag.longPressed && state.drag.kind === 'element' && !state.drag.dragging && (dx > 8 || dy > 8)) {
       startElementDrag(event.clientX, event.clientY);
+    }
+    if (state.drag.longPressed && state.drag.kind === 'section' && !state.drag.dragging && (dx > 8 || dy > 8)) {
+      startSectionDrag(event.clientX, event.clientY);
     }
     if (!state.drag.dragging) return;
     event.preventDefault();
     updateDragTarget(event.clientX, event.clientY);
+    updateAutoScroll(event.clientY);
   }
 
   function handlePointerUp() {
@@ -1013,20 +1080,24 @@
     var kind = state.drag.kind;
     var targetSectionId = state.drag.overSectionId;
     var targetIndex = state.drag.overIndex;
+    var targetSectionIndex = state.drag.overSectionIndex;
     var elementId = state.drag.elementId;
     var sectionId = state.drag.sectionId;
     clearDragTimer();
     removeDragListeners();
+    stopAutoScroll();
     document.body.classList.remove('is-dragging-element');
     document.body.classList.remove('is-long-pressing');
     state.drag = null;
     if (wasDragging) {
       state.suppressNextClick = true;
-      moveElement(elementId, targetSectionId, targetIndex);
+      state.suppressClickUntil = Date.now() + 550;
+      if (kind === 'element') moveElement(elementId, targetSectionId, targetIndex);
+      if (kind === 'section') moveSection(sectionId, targetSectionIndex);
     } else if (wasLongPressed) {
       state.suppressNextClick = true;
-      if (kind === 'element') copyElement(elementId);
-      if (kind === 'section') copySection(sectionId);
+      state.suppressClickUntil = Date.now() + 550;
+      openDuplicatePrompt(kind, elementId, sectionId, state.dragPointX || 0, state.dragPointY || 0);
     } else {
       return;
     }
@@ -1036,6 +1107,8 @@
     if (!state.drag) return;
     state.drag.pending = false;
     state.drag.longPressed = true;
+    state.dragPointX = state.drag.lastX || state.drag.startX;
+    state.dragPointY = state.drag.lastY || state.drag.startY;
     document.body.classList.add('is-long-pressing');
     if (window.navigator && window.navigator.vibrate) window.navigator.vibrate(12);
   }
@@ -1051,16 +1124,74 @@
     document.body.classList.remove('is-long-pressing');
     document.body.classList.add('is-dragging-element');
     updateDragTarget(x, y, true);
+    updateAutoScroll(y);
+  }
+
+  function startSectionDrag(x, y) {
+    if (!state.drag) return;
+    state.drag.pending = false;
+    state.drag.longPressed = true;
+    state.drag.dragging = true;
+    state.activeElementId = null;
+    state.activeSectionId = null;
+    state.activeSectionColorId = null;
+    state.sheet = null;
+    document.body.classList.remove('is-long-pressing');
+    document.body.classList.add('is-dragging-element');
+    updateDragTarget(x, y, true);
+    updateAutoScroll(y);
   }
 
   function updateDragTarget(x, y, forceRender) {
     if (!state.drag) return;
-    var target = findDropTarget(x, y);
+    var target = state.drag.kind === 'section' ? findSectionDropTarget(y) : findDropTarget(x, y);
     if (!target) return;
-    var changed = state.drag.overSectionId !== target.sectionId || state.drag.overIndex !== target.index;
-    state.drag.overSectionId = target.sectionId;
-    state.drag.overIndex = target.index;
+    var changed = false;
+    if (state.drag.kind === 'section') {
+      changed = state.drag.overSectionIndex !== target.index;
+      state.drag.overSectionIndex = target.index;
+    } else {
+      changed = state.drag.overSectionId !== target.sectionId || state.drag.overIndex !== target.index;
+      state.drag.overSectionId = target.sectionId;
+      state.drag.overIndex = target.index;
+    }
     if (changed || forceRender) render();
+  }
+
+  function updateAutoScroll(y) {
+    if (!state.drag || !state.drag.dragging) return stopAutoScroll();
+    var viewportHeight = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+    var edge = Math.min(96, Math.max(64, viewportHeight * 0.14));
+    var direction = 0;
+    var distance = 0;
+    if (y < edge) {
+      direction = -1;
+      distance = edge - y;
+    } else if (y > viewportHeight - edge) {
+      direction = 1;
+      distance = y - (viewportHeight - edge);
+    }
+    if (!direction) return stopAutoScroll();
+    var speed = Math.min(18, Math.max(3, Math.round(distance / 7)));
+    if (state.autoScroll && state.autoScroll.direction === direction) {
+      state.autoScroll.speed = speed;
+      return;
+    }
+    stopAutoScroll();
+    state.autoScroll = { direction: direction, speed: speed, timer: null };
+    runAutoScroll();
+  }
+
+  function runAutoScroll() {
+    if (!state.autoScroll || !state.drag || !state.drag.dragging) return stopAutoScroll();
+    if (window.scrollBy) window.scrollBy(0, state.autoScroll.direction * state.autoScroll.speed);
+    updateDragTarget(state.drag.lastX || state.drag.startX, state.drag.lastY || state.drag.startY, false);
+    state.autoScroll.timer = window.setTimeout(runAutoScroll, 32);
+  }
+
+  function stopAutoScroll() {
+    if (state.autoScroll && state.autoScroll.timer) window.clearTimeout(state.autoScroll.timer);
+    state.autoScroll = null;
   }
 
   function findDropTarget(x, y) {
@@ -1095,6 +1226,46 @@
     return { sectionId: sectionId, index: index };
   }
 
+  function findSectionDropTarget(y) {
+    var page = currentPage();
+    if (!page || !state.drag) return null;
+    var sections = pageSections(page).filter(function (section) { return section.id !== state.drag.sectionId; });
+    var nodes = Array.prototype.slice.call(app.querySelectorAll('.calc-section')).filter(function (node) {
+      return node.dataset.sectionId !== state.drag.sectionId;
+    });
+    var index = sections.length;
+    for (var i = 0; i < nodes.length; i += 1) {
+      var rect = nodes[i].getBoundingClientRect();
+      if (y < rect.top + rect.height / 2) {
+        index = Math.min(i, sections.length);
+        break;
+      }
+    }
+    return { index: index };
+  }
+
+  function openDuplicatePrompt(kind, elementId, sectionId, x, y) {
+    var width = window.innerWidth || 390;
+    var height = window.innerHeight || 844;
+    state.duplicatePrompt = {
+      kind: kind,
+      elementId: elementId || null,
+      sectionId: sectionId || null,
+      x: Math.min(Math.max(82, x), Math.max(82, width - 82)),
+      y: Math.min(Math.max(82, y - 12), Math.max(82, height - 72))
+    };
+    render();
+  }
+
+  function confirmDuplicate() {
+    var prompt = state.duplicatePrompt;
+    if (!prompt) return;
+    state.duplicatePrompt = null;
+    state.suppressNextClick = false;
+    if (prompt.kind === 'element') return copyElement(prompt.elementId);
+    if (prompt.kind === 'section') return copySection(prompt.sectionId);
+  }
+
   function moveElement(elementId, targetSectionId, targetIndex) {
     var element = state.doc.elements[elementId];
     var source = element && getSection(element.sectionId);
@@ -1112,6 +1283,25 @@
     touch(source);
     touch(target);
     touch(element);
+    saveDocument();
+    render();
+  }
+
+  function moveSection(sectionId, targetIndex) {
+    var section = getSection(sectionId);
+    var page = section && getPage(section.pageId);
+    if (!section || !page) return render();
+    var order = pageSections(page).map(function (item) { return item.id; });
+    var sourceIndex = order.indexOf(sectionId);
+    var nextOrder = order.filter(function (id) { return id !== sectionId; });
+    targetIndex = Math.max(0, Math.min(targetIndex, nextOrder.length));
+    if (sourceIndex === targetIndex) return render();
+    commitHistory();
+    nextOrder.splice(targetIndex, 0, sectionId);
+    page.sectionOrder = nextOrder;
+    touch(page);
+    state.activeSectionId = sectionId;
+    state.activeElementId = null;
     saveDocument();
     render();
   }
@@ -1195,6 +1385,7 @@
   function cancelDrag() {
     clearDragTimer();
     removeDragListeners();
+    stopAutoScroll();
     document.body.classList.remove('is-dragging-element');
     document.body.classList.remove('is-long-pressing');
     state.drag = null;
@@ -1233,11 +1424,15 @@
     if (!inputs.length) return { ok: false, error: 'Werte fehlen' };
     var values = [];
     for (var i = 0; i < inputs.length; i += 1) {
-      var source = state.doc.elements[inputs[i].elementId];
-      if (!source || source.deletedAt) return { ok: false, error: 'Verknüpfung fehlt' };
-      var result = computeElement(source.id, stack);
-      if (!result.ok) return result;
-      values.push(result.value);
+      if (isFormulaValueInput(inputs[i])) {
+        values.push(parseNumber(inputs[i].value));
+      } else {
+        var source = state.doc.elements[inputs[i].elementId];
+        if (!source || source.deletedAt) return { ok: false, error: 'Verknüpfung fehlt' };
+        var result = computeElement(source.id, stack);
+        if (!result.ok) return result;
+        values.push(result.value);
+      }
     }
     var value = values[0];
     if (formula.operator === 'average') value = values.reduce(function (sum, item) { return sum + item; }, 0) / values.length;
@@ -1264,7 +1459,7 @@
     if (element.type === 'number' && element.stepper) {
       chip.innerHTML = '<span>' + esc(elementLabel(element)) + '</span><span class=\"stepper\"><span>▴</span><span>▾</span></span>';
     } else if (element.type === 'formula') {
-      chip.innerHTML = '<span>' + esc(element.name || 'Formel') + '</span><strong data-result-for=\"' + attr(element.id) + '\">' + esc(formatComputation(element, computeElement(element.id, []))) + '</strong>';
+      chip.innerHTML = (element.hideName ? '' : '<span>' + esc(element.name || 'Formel') + '</span>') + '<strong data-result-for=\"' + attr(element.id) + '\">' + esc(formatComputation(element, computeElement(element.id, []))) + '</strong>';
     } else {
       chip.textContent = elementLabel(element);
     }
@@ -1305,7 +1500,7 @@
 
   function formulaDescription(element) {
     var formula = normalizeFormula(element.formula || { operator: 'chain', inputs: [] });
-    var names = (formula.inputs || []).map(function (ref) { return elementLabel(state.doc.elements[ref.elementId]) || 'Fehlt'; });
+    var names = (formula.inputs || []).map(function (ref) { return formulaInputLabel(ref); });
     if (!names.length) return FORMULA_MODES[formula.operator] || 'Formel';
     if (formula.operator === 'average') return 'Ø(' + names.join(', ') + ')';
     var out = names[0];
@@ -1314,6 +1509,15 @@
       out += ' ' + op.symbol + ' ' + names[i];
     }
     return out;
+  }
+
+  function isFormulaValueInput(ref) {
+    return !!ref && (ref.kind === 'value' || !ref.elementId);
+  }
+
+  function formulaInputLabel(ref) {
+    if (isFormulaValueInput(ref)) return new Intl.NumberFormat('de-DE', { maximumFractionDigits: 4 }).format(parseNumber(ref.value));
+    return elementLabel(state.doc.elements[ref.elementId]) || 'Fehlt';
   }
 
   function sourceElements(formulaElement) {
