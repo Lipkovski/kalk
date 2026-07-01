@@ -53,6 +53,8 @@
     app.addEventListener('input', handleInput);
     app.addEventListener('change', handleChange);
     app.addEventListener('pointerdown', handlePointerDown);
+    app.addEventListener('contextmenu', handleContextMenu);
+    document.addEventListener('selectstart', handleSelectStart);
     document.addEventListener('focusin', function (event) {
       if (isInput(event.target)) {
         state.activeInput = true;
@@ -568,6 +570,14 @@
     if (action === 'hide-keyboard') return hideKeyboard();
   }
 
+  function handleContextMenu(event) {
+    if (event.target.closest('[data-element-id], .section-title, .section-rail')) event.preventDefault();
+  }
+
+  function handleSelectStart(event) {
+    if (state.drag && (state.drag.pending || state.drag.longPressed || state.drag.dragging)) event.preventDefault();
+  }
+
   function handleInput(event) {
     var target = event.target;
     var field = target.dataset.field;
@@ -949,24 +959,33 @@
   function handlePointerDown(event) {
     if (event.button && event.button !== 0) return;
     if (getPageMode(currentPage()) !== 'edit') return;
-    if (isInput(event.target) || event.target.closest('.mini-button, .round-plus, .line-plus-button, .color-chip')) return;
+    if (isInput(event.target) || event.target.closest('.mini-button, .round-plus, .line-plus-button, .color-chip, .element-popover, .section-editor')) return;
     var chip = event.target.closest('[data-element-id]');
-    if (!chip) return;
-    var element = state.doc.elements[chip.dataset.elementId];
-    if (!element || element.deletedAt) return;
+    var sectionNode = event.target.closest('.calc-section');
+    var sectionControl = event.target.closest('.section-title, .section-rail') || (!chip && sectionNode ? sectionNode : null);
+    var kind = chip ? 'element' : (sectionControl && sectionNode ? 'section' : null);
+    if (!kind) return;
+    var element = chip ? state.doc.elements[chip.dataset.elementId] : null;
+    var section = sectionNode ? getSection(sectionNode.dataset.sectionId) : null;
+    if (kind === 'element' && (!element || element.deletedAt)) return;
+    if (kind === 'section' && (!section || section.deletedAt)) return;
     clearDragTimer();
     state.drag = {
+      kind: kind,
       pending: true,
       dragging: false,
-      elementId: element.id,
-      sourceSectionId: element.sectionId,
+      longPressed: false,
+      copied: false,
+      elementId: element ? element.id : null,
+      sectionId: section ? section.id : null,
+      sourceSectionId: element ? element.sectionId : (section ? section.id : null),
       startX: event.clientX,
       startY: event.clientY,
-      overSectionId: element.sectionId,
+      overSectionId: element ? element.sectionId : (section ? section.id : null),
       overIndex: 0,
       timer: window.setTimeout(function () {
-        startElementDrag(event.clientX, event.clientY);
-      }, 360)
+        markLongPress();
+      }, 420)
     };
     document.addEventListener('pointermove', handlePointerMove);
     document.addEventListener('pointerup', handlePointerUp);
@@ -978,6 +997,10 @@
     var dx = Math.abs(event.clientX - state.drag.startX);
     var dy = Math.abs(event.clientY - state.drag.startY);
     if (state.drag.pending && (dx > 10 || dy > 10)) return cancelDrag();
+    if (state.drag.longPressed && state.drag.kind === 'section' && (dx > 12 || dy > 12)) return cancelDrag();
+    if (state.drag.longPressed && state.drag.kind === 'element' && !state.drag.dragging && (dx > 8 || dy > 8)) {
+      startElementDrag(event.clientX, event.clientY);
+    }
     if (!state.drag.dragging) return;
     event.preventDefault();
     updateDragTarget(event.clientX, event.clientY);
@@ -986,28 +1009,46 @@
   function handlePointerUp() {
     if (!state.drag) return;
     var wasDragging = state.drag.dragging;
+    var wasLongPressed = state.drag.longPressed;
+    var kind = state.drag.kind;
     var targetSectionId = state.drag.overSectionId;
     var targetIndex = state.drag.overIndex;
     var elementId = state.drag.elementId;
+    var sectionId = state.drag.sectionId;
     clearDragTimer();
     removeDragListeners();
     document.body.classList.remove('is-dragging-element');
+    document.body.classList.remove('is-long-pressing');
     state.drag = null;
     if (wasDragging) {
       state.suppressNextClick = true;
       moveElement(elementId, targetSectionId, targetIndex);
+    } else if (wasLongPressed) {
+      state.suppressNextClick = true;
+      if (kind === 'element') copyElement(elementId);
+      if (kind === 'section') copySection(sectionId);
     } else {
-      render();
+      return;
     }
+  }
+
+  function markLongPress() {
+    if (!state.drag) return;
+    state.drag.pending = false;
+    state.drag.longPressed = true;
+    document.body.classList.add('is-long-pressing');
+    if (window.navigator && window.navigator.vibrate) window.navigator.vibrate(12);
   }
 
   function startElementDrag(x, y) {
     if (!state.drag) return;
     state.drag.pending = false;
+    state.drag.longPressed = true;
     state.drag.dragging = true;
     state.activeElementId = null;
     state.activeSectionId = null;
     state.sheet = null;
+    document.body.classList.remove('is-long-pressing');
     document.body.classList.add('is-dragging-element');
     updateDragTarget(x, y, true);
   }
@@ -1075,10 +1116,87 @@
     render();
   }
 
+  function copyElement(elementId) {
+    var element = state.doc.elements[elementId];
+    var section = element && getSection(element.sectionId);
+    if (!element || element.deletedAt || !section) return render();
+    commitHistory();
+    var clone = cloneElement(element, element.pageId, section.id);
+    state.doc.elements[clone.id] = clone;
+    var index = section.elementOrder.indexOf(elementId);
+    section.elementOrder.splice(index + 1, 0, clone.id);
+    touch(section);
+    state.activeElementId = clone.id;
+    state.activeSectionId = null;
+    saveDocument();
+    showToast('Element kopiert');
+    render();
+  }
+
+  function copySection(sectionId) {
+    var section = getSection(sectionId);
+    var page = section && getPage(section.pageId);
+    if (!section || section.deletedAt || !page) return render();
+    commitHistory();
+    var newSectionId = uid('section');
+    var idMap = {};
+    var newOrder = [];
+    var sourceIds = (section.elementOrder || []).filter(function (id) {
+      var element = state.doc.elements[id];
+      return element && !element.deletedAt;
+    });
+    sourceIds.forEach(function (oldId) {
+      idMap[oldId] = uid('element');
+      newOrder.push(idMap[oldId]);
+    });
+    state.doc.sections[newSectionId] = stamp({
+      id: newSectionId,
+      pageId: page.id,
+      name: section.name ? section.name + ' Kopie' : '',
+      color: section.color,
+      elementOrder: newOrder
+    });
+    sourceIds.forEach(function (oldId) {
+      var clone = cloneElement(state.doc.elements[oldId], page.id, newSectionId, idMap[oldId]);
+      if (clone.type === 'formula' && clone.formula && clone.formula.inputs) {
+        clone.formula.inputs = clone.formula.inputs.map(function (ref) {
+          if (idMap[ref.elementId]) {
+            return Object.assign({}, ref, { pageId: page.id, elementId: idMap[ref.elementId] });
+          }
+          return ref;
+        });
+      }
+      state.doc.elements[clone.id] = clone;
+    });
+    var index = page.sectionOrder.indexOf(section.id);
+    page.sectionOrder.splice(index + 1, 0, newSectionId);
+    touch(page);
+    state.activeSectionId = newSectionId;
+    state.activeElementId = null;
+    state.activeSectionColorId = null;
+    saveDocument();
+    showToast('Bereich kopiert');
+    render();
+  }
+
+  function cloneElement(element, pageId, sectionId, forcedId) {
+    var clone = JSON.parse(JSON.stringify(element));
+    clone.id = forcedId || uid('element');
+    clone.pageId = pageId;
+    clone.sectionId = sectionId;
+    clone.createdAt = now();
+    clone.updatedAt = clone.createdAt;
+    clone.deletedAt = null;
+    clone.version = 1;
+    normalizeElement(clone);
+    return clone;
+  }
+
   function cancelDrag() {
     clearDragTimer();
     removeDragListeners();
     document.body.classList.remove('is-dragging-element');
+    document.body.classList.remove('is-long-pressing');
     state.drag = null;
   }
 
