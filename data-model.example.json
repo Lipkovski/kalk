@@ -1,0 +1,150 @@
+{
+  "schemaVersion": 2,
+  "meta": {
+    "workspaceId": "workspace-uuid",
+    "createdAt": "2026-06-28T11:30:00.000Z",
+    "updatedAt": "2026-06-28T11:30:00.000Z",
+    "version": 1
+  },
+  "settings": {
+    "theme": "dark"
+  },
+  "folders": [
+    {
+      "id": "folder-uuid",
+      "name": "Rezepte",
+      "isOpen": true,
+      "sortIndex": 0,
+      "createdAt": "2026-06-28T11:30:00.000Z",
+      "updatedAt": "2026-06-28T11:30:00.000Z",
+      "deletedAt": null,
+      "version": 1
+    }
+  ],
+  "pages": [
+    {
+      "id": "page-uuid",
+      "folderId": "folder-uuid",
+      "name": "Pizza Kalkulation",
+      "icon": "🍕",
+      "color": "#F2A65A",
+      "sortIndex": 0,
+      "sectionOrder": [
+        "section-salami",
+        "section-margarita"
+      ],
+      "createdAt": "2026-06-28T11:30:00.000Z",
+      "updatedAt": "2026-06-28T11:30:00.000Z",
+      "deletedAt": null,
+      "version": 1
+    }
+  ],
+  "sections": {
+    "section-salami": {
+      "id": "section-salami",
+      "pageId": "page-uuid",
+      "name": "Salami Pizza",
+      "color": "#F2A65A",
+      "elementOrder": [
+        "el-count-1",
+        "el-text-mehl",
+        "el-weight-mehl",
+        "el-count-2",
+        "el-text-sosse",
+        "el-total"
+      ],
+      "createdAt": "2026-06-28T11:30:00.000Z",
+      "updatedAt": "2026-06-28T11:30:00.000Z",
+      "deletedAt": null,
+      "version": 1
+    },
+    "section-margarita": {
+      "id": "section-margarita",
+      "pageId": "page-uuid",
+      "name": "Margarita",
+      "color": "#F1C27D",
+      "elementOrder": [],
+      "createdAt": "2026-06-28T11:30:00.000Z",
+      "updatedAt": "2026-06-28T11:30:00.000Z",
+      "deletedAt": null,
+      "version": 1
+    }
+  },
+  "elements": {
+    "el-count-1": {
+      "id": "el-count-1",
+      "pageId": "page-uuid",
+      "sectionId": "section-salami",
+      "type": "number",
+      "name": "Anzahl",
+      "value": 1,
+      "valueType": "number",
+      "currency": "EUR",
+      "unit": "",
+      "color": "#AFC4E9",
+      "stepper": true,
+      "startsRow": false,
+      "createdAt": "2026-06-28T11:30:00.000Z",
+      "updatedAt": "2026-06-28T11:30:00.000Z",
+      "deletedAt": null,
+      "version": 1
+    },
+    "el-text-mehl": {
+      "id": "el-text-mehl",
+      "pageId": "page-uuid",
+      "sectionId": "section-salami",
+      "type": "text",
+      "name": "Text",
+      "text": "Mehl",
+      "color": "#C9ADA7",
+      "startsRow": false,
+      "createdAt": "2026-06-28T11:30:00.000Z",
+      "updatedAt": "2026-06-28T11:30:00.000Z",
+      "deletedAt": null,
+      "version": 1
+    },
+    "el-weight-mehl": {
+      "id": "el-weight-mehl",
+      "pageId": "page-uuid",
+      "sectionId": "section-salami",
+      "type": "number",
+      "name": "Menge",
+      "value": 150,
+      "valueType": "weight",
+      "currency": "EUR",
+      "unit": "g",
+      "color": "#E8B4A0",
+      "stepper": false,
+      "startsRow": false,
+      "createdAt": "2026-06-28T11:30:00.000Z",
+      "updatedAt": "2026-06-28T11:30:00.000Z",
+      "deletedAt": null,
+      "version": 1
+    },
+    "el-total": {
+      "id": "el-total",
+      "pageId": "page-uuid",
+      "sectionId": "section-salami",
+      "type": "formula",
+      "name": "Gesamt",
+      "valueType": "weight",
+      "currency": "EUR",
+      "unit": "g",
+      "color": "#F2A65A",
+      "startsRow": false,
+      "formula": {
+        "operator": "sum",
+        "inputs": [
+          {
+            "pageId": "page-uuid",
+            "elementId": "el-weight-mehl"
+          }
+        ]
+      },
+      "createdAt": "2026-06-28T11:30:00.000Z",
+      "updatedAt": "2026-06-28T11:30:00.000Z",
+      "deletedAt": null,
+      "version": 1
+    }
+  }
+}

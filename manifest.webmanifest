@@ -1,0 +1,19 @@
+{
+  "name": "Kalkulationsbaukasten",
+  "short_name": "Kalk",
+  "description": "Mobile-first Seiten, Blöcke und UUID-basierte Kalkulationen.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#141414",
+  "theme_color": "#141414",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
