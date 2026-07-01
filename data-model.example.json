@@ -133,11 +133,12 @@
       "color": "#F2A65A",
       "startsRow": false,
       "formula": {
-        "operator": "sum",
+        "operator": "chain",
         "inputs": [
           {
             "pageId": "page-uuid",
-            "elementId": "el-weight-mehl"
+            "elementId": "el-weight-mehl",
+            "op": "start"
           }
         ]
       },
