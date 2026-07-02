@@ -1,4 +1,4 @@
-(function () {
+﻿(function () {
   'use strict';
 
   var STORAGE_KEY = 'kalkulationsbaukasten.document.v2';
@@ -560,7 +560,24 @@
   function handleClick(event) {
     var target = event.target.closest('[data-action]');
     var action = target ? target.dataset.action : '';
-    if (state.suppressNextClick && !(state.duplicatePrompt && action === 'confirm-duplicate')) {
+    if (state.duplicatePrompt) {
+      if (action === 'confirm-duplicate') {
+        event.preventDefault();
+        state.suppressNextClick = false;
+        return confirmDuplicate();
+      }
+      if (state.suppressNextClick && Date.now() < state.suppressClickUntil && isDuplicateSourceClick(event.target)) {
+        state.suppressNextClick = false;
+        event.preventDefault();
+        return;
+      }
+      state.duplicatePrompt = null;
+      state.suppressNextClick = false;
+      event.preventDefault();
+      render();
+      return;
+    }
+    if (state.suppressNextClick) {
       if (!state.suppressClickUntil || Date.now() < state.suppressClickUntil) {
         event.preventDefault();
         return;
@@ -568,12 +585,6 @@
       state.suppressNextClick = false;
     }
     state.suppressNextClick = false;
-    if (state.duplicatePrompt && action !== 'confirm-duplicate') {
-      state.duplicatePrompt = null;
-      event.preventDefault();
-      render();
-      return;
-    }
     if (!target) return;
     if (action === 'close-sheet' && target.classList.contains('sheet-backdrop') && event.target !== target) return;
     event.preventDefault();
@@ -610,6 +621,20 @@
     if (action === 'set-section-color') return setSectionColor(target.dataset.id, target.dataset.color);
     if (action === 'delete-page') return deletePage();
     if (action === 'hide-keyboard') return hideKeyboard();
+  }
+
+  function isDuplicateSourceClick(target) {
+    var prompt = state.duplicatePrompt;
+    if (!prompt || !target) return false;
+    if (prompt.kind === 'element') {
+      var elementNode = target.closest('[data-element-id]');
+      return !!(elementNode && elementNode.dataset.elementId === prompt.elementId);
+    }
+    if (prompt.kind === 'section') {
+      var sectionNode = target.closest('.calc-section');
+      return !!(sectionNode && sectionNode.dataset.sectionId === prompt.sectionId);
+    }
+    return false;
   }
 
   function handleContextMenu(event) {
@@ -1017,8 +1042,8 @@
   function handlePointerDown(event) {
     if (event.button && event.button !== 0) return;
     if (getPageMode(currentPage()) !== 'edit') return;
+    if (state.duplicatePrompt) return;
     if (isInput(event.target) || event.target.closest('.mini-button, .round-plus, .line-plus-button, .color-chip, .element-popover, .section-editor')) return;
-    state.duplicatePrompt = null;
     var chip = event.target.closest('[data-element-id]');
     var sectionNode = event.target.closest('.calc-section');
     var sectionControl = event.target.closest('.section-title, .section-rail') || (!chip && sectionNode ? sectionNode : null);
