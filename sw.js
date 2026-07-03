@@ -1,4 +1,4 @@
-﻿const CACHE_NAME = "kalkulationsbaukasten-v8";
+﻿const CACHE_NAME = "kalkulationsbaukasten-v9";
 const ASSETS = ["./", "./index.html", "./styles.css", "./app.js", "./manifest.webmanifest", "./icon.svg", "./data-model.example.json"];
 
 self.addEventListener("install", (event) => {

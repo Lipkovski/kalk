@@ -1,4 +1,4 @@
-﻿(function () {
+(function () {
   'use strict';
 
   var STORAGE_KEY = 'kalkulationsbaukasten.document.v2';
@@ -6,8 +6,9 @@
   var EMOJIS = ['🍕', '🥐', '🍰', '☕', '🧾', '💶', '🧮', '📦', '🛒', '🏷️', '📋', '✨', '🔧', '🏠', '🌿', '🍋'];
   var CURRENCIES = ['EUR', 'USD', 'CHF', 'GBP'];
   var WEIGHT_UNITS = { mg: 'mg', g: 'g', kg: 'kg', t: 't', oz: 'oz', lb: 'lb' };
-  var VALUE_TYPES = { number: 'Zahl', currency: 'Währung', weight: 'Gewicht', percent: 'Prozent', date: 'Datum' };
-  var FORMULA_VALUE_TYPES = { number: 'Zahl', currency: 'Währung', weight: 'Gewicht', percent: 'Prozent' };
+  var VOLUME_UNITS = { ml: 'ml', cl: 'cl', dl: 'dl', l: 'l', tsp: 'TL', tbsp: 'EL', cup: 'Cup', floz: 'fl oz', pcs: 'Stk', pinch: 'Prise' };
+  var VALUE_TYPES = { number: 'Zahl', currency: 'Währung', weight: 'Gewicht', volume: 'Menge', percent: 'Prozent', date: 'Datum' };
+  var FORMULA_VALUE_TYPES = { number: 'Zahl', currency: 'Währung', weight: 'Gewicht', volume: 'Menge', percent: 'Prozent' };
   var ELEMENT_TYPES = { text: 'Text', number: 'Zahl', formula: 'Formel' };
   var FORMULA_MODES = {
     chain: 'Kombinieren',
@@ -195,16 +196,21 @@
     if (element.type === 'text' && element.text === 'Text') element.text = '';
     if (element.type === 'number') {
       if (!element.valueType) element.valueType = 'number';
-      if (element.valueType === 'weight' && !element.unit) element.unit = 'g';
-      if (element.unit === 'Tonnen') element.unit = 't';
+      normalizeUnit(element);
     }
     if (element.type === 'formula') {
       element.formula = normalizeFormula(element.formula || { operator: 'chain', inputs: [] });
       if (typeof element.hideName === 'undefined') element.hideName = false;
       if (!element.valueType || element.valueType === 'date') element.valueType = 'number';
-      if (element.valueType === 'weight' && !element.unit) element.unit = 'g';
-      if (element.unit === 'Tonnen') element.unit = 't';
+      normalizeUnit(element);
     }
+  }
+
+  function normalizeUnit(element) {
+    if (element.unit === 'Tonnen') element.unit = 't';
+    if (element.unit === 'Liter') element.unit = 'l';
+    if (element.valueType === 'weight' && !WEIGHT_UNITS[element.unit]) element.unit = 'g';
+    if (element.valueType === 'volume' && !VOLUME_UNITS[element.unit]) element.unit = 'ml';
   }
 
   function normalizeFormula(formula) {
@@ -279,8 +285,9 @@
     return '<button class="page-row" style="--page-color:' + attr(page.color || COLORS[0]) + '" data-action="open-page" data-id="' + attr(page.id) + '"><span class="page-icon">' + esc(page.icon || '📄') + '</span><span class="page-row-title ' + (!page.name ? 'is-placeholder' : '') + '">' + esc(page.name || 'Neue Seite') + '</span><span class="chevron">›</span></button>';
   }
 
-  function renderLinePlus(action, id, title, extraClass) {
-    return '<div class="line-plus ' + (extraClass || '') + '"><button class="line-plus-button" data-action="' + attr(action) + '" data-id="' + attr(id || '') + '" title="' + attr(title || 'Hinzufügen') + '">+</button></div>';
+  function renderLinePlus(action, id, title, extraClass, index) {
+    var indexAttr = typeof index === 'undefined' ? '' : ' data-index="' + attr(index) + '"';
+    return '<div class="line-plus ' + (extraClass || '') + '"><button class="line-plus-button" data-action="' + attr(action) + '" data-id="' + attr(id || '') + '"' + indexAttr + ' title="' + attr(title || 'Hinzufügen') + '">+</button></div>';
   }
 
   function renderPage() {
@@ -299,7 +306,7 @@
       html += '<div class="page-name-strip"><button class="page-icon-edit" data-action="open-page-settings">' + esc(page.icon || '📄') + '</button><input class="page-name-input" data-field="page-name" value="' + attr(page.name || '') + '" placeholder="Neue Seite" /></div>';
     }
     html += '<section class="section-stack">';
-    if (!sections.length && isEdit) html += renderLinePlus('add-section', page.id, 'Bereich');
+    if (!sections.length && isEdit) html += renderLinePlus('add-section', page.id, 'Bereich', '', 0);
     if (sections.length && isEdit) html += renderSectionDropMarker(0);
     sections.forEach(function (section) {
       html += renderSection(section, isEdit);
@@ -307,7 +314,7 @@
         sectionDropIndex += 1;
         if (isEdit) html += renderSectionDropMarker(sectionDropIndex);
       }
-      if (isEdit && section.id !== draggingSectionId) html += renderLinePlus('add-section', page.id, 'Bereich');
+      if (isEdit && section.id !== draggingSectionId) html += renderLinePlus('add-section', page.id, 'Bereich', '', sectionDropIndex);
     });
     html += '</section></main>';
     return html;
@@ -318,8 +325,11 @@
     var dragging = state.drag && state.drag.kind === 'section' && state.drag.sectionId === section.id;
     var html = '<section class="calc-section ' + (dragging ? 'is-dragging-section' : '') + '" data-section-id="' + attr(section.id) + '" style="--section-color:' + attr(section.color || COLORS[0]) + '">';
     html += '<button class="section-rail" data-action="select-section" data-id="' + attr(section.id) + '" title="Bereich"></button><div class="section-panel">';
-    html += '<button class="section-title ' + (isEdit ? 'can-edit' : '') + (!section.name ? ' is-placeholder' : '') + '" data-action="select-section" data-id="' + attr(section.id) + '">' + esc(section.name || 'Neuer Bereich') + '</button>';
-    if (isEdit && state.activeSectionId === section.id) html += renderSectionEditor(section);
+    if (isEdit && state.activeSectionId === section.id) {
+      html += renderSectionEditor(section);
+    } else {
+      html += '<button class="section-title ' + (isEdit ? 'can-edit' : '') + (!section.name ? ' is-placeholder' : '') + '" data-action="select-section" data-id="' + attr(section.id) + '">' + esc(section.name || 'Neuer Bereich') + '</button>';
+    }
     html += '<div class="section-elements" data-section-id="' + attr(section.id) + '">';
     var dropIndex = 0;
     if (isEdit) html += renderDropMarker(section.id, dropIndex);
@@ -330,7 +340,7 @@
         dropIndex += 1;
         if (isEdit) html += renderDropMarker(section.id, dropIndex);
       }
-      if (state.activeElementId === element.id) html += renderElementEditor(element, isEdit);
+      if (state.activeElementId === element.id && element.type !== 'text') html += renderElementEditor(element, isEdit);
     });
     if (isEdit) html += '<button class="round-plus" data-action="open-add-element" data-id="' + attr(section.id) + '" title="Element hinzufügen">+</button>';
     html += '</div></div></section>';
@@ -338,10 +348,9 @@
   }
 
   function renderSectionEditor(section) {
-    var html = '<div class="section-editor"><div class="editor-head"><span class="editor-title">Bereich</span><div class="editor-actions"><button class="color-chip" style="--swatch:' + attr(section.color || COLORS[0]) + '" data-action="toggle-section-colors" data-id="' + attr(section.id) + '" title="Farbe"></button><button class="mini-button" data-action="close-section-editor">×</button></div></div>';
+    var html = '<div class="section-editor"><div class="section-editor-head"><button class="danger-button section-delete-button" data-action="delete-section" data-id="' + attr(section.id) + '">Bereich löschen</button><input class="section-title-input" data-field="section-name" data-id="' + attr(section.id) + '" value="' + attr(section.name || '') + '" placeholder="Neuer Bereich" /><div class="editor-actions"><button class="color-chip" style="--swatch:' + attr(section.color || COLORS[0]) + '" data-action="toggle-section-colors" data-id="' + attr(section.id) + '" title="Farbe"></button><button class="mini-button" data-action="close-section-editor">×</button></div></div>';
     if (state.activeSectionColorId === section.id) html += renderSwatches('set-section-color', section.id, section.color);
-    html += '<label class="field">Name<input class="input" data-field="section-name" data-id="' + attr(section.id) + '" value="' + attr(section.name || '') + '" placeholder="Neuer Bereich" /></label>';
-    html += '<div class="action-row"><button class="danger-button" data-action="delete-section" data-id="' + attr(section.id) + '">Bereich löschen</button></div>';
+
     html += '</div>';
     return html;
   }
@@ -360,6 +369,7 @@
     var label = elementLabel(element);
     var cls = 'element-chip ' + element.type + '-chip ' + (state.activeElementId === element.id ? 'is-active' : '') + (state.drag && state.drag.elementId === element.id ? ' is-dragging' : '');
     if (!isEdit && element.type === 'number') return renderFillNumberChip(element, cls);
+    if (isEdit && element.type === 'text') return '<input class="' + cls + ' inline-text-chip ' + (!element.text ? 'is-placeholder' : '') + '" data-field="element-text" data-id="' + attr(element.id) + '" data-element-id="' + attr(element.id) + '" type="text" value="' + attr(element.text || '') + '" placeholder="Text" />';
     var html = '<button class="' + cls + (element.type === 'text' && !element.text ? ' is-placeholder' : '') + '" data-action="select-element" data-id="' + attr(element.id) + '" data-element-id="' + attr(element.id) + '">';
     if (element.type === 'number' && element.stepper) {
       html += '<span>' + esc(label) + '</span><span class="stepper"><span>▴</span><span>▾</span></span>';
@@ -381,7 +391,8 @@
     html += '<input class="chip-number-input" data-field="element-value" data-id="' + attr(element.id) + '" type="' + inputType + '" step="any" inputmode="decimal" value="' + attr(value) + '" placeholder="0" />';
     if (element.stepper) html += '<button class="step-button" data-action="step-number" data-id="' + attr(element.id) + '" data-step="1" title="Erhöhen">+</button>';
     if (element.valueType === 'currency') html += '<span class="chip-unit">' + esc(element.currency || 'EUR') + '</span>';
-    if (element.valueType === 'weight') html += '<span class="chip-unit">' + esc(element.unit || 'g') + '</span>';
+    if (element.valueType === 'weight') html += '<span class="chip-unit">' + esc(unitLabel(element)) + '</span>';
+    if (element.valueType === 'volume') html += '<span class="chip-unit">' + esc(unitLabel(element)) + '</span>';
     if (element.valueType === 'percent') html += '<span class="chip-unit">%</span>';
     html += '</div>';
     return html;
@@ -394,9 +405,7 @@
     if (element.type === 'text') html += renderTextEditor(element, isEdit);
     if (element.type === 'number') html += renderNumberEditor(element, isEdit, fillOnly);
     if (element.type === 'formula') html += renderFormulaEditor(element, isEdit);
-    if (isEdit) {
-      html += '<div class="action-row"><button class="danger-button" data-action="delete-element" data-id="' + attr(element.id) + '">Element löschen</button></div>';
-    }
+
     html += '</div>';
     return html;
   }
@@ -414,6 +423,7 @@
     html += '</div>';
     if (isEdit && element.valueType === 'currency') html += '<label class="field">Währung' + renderSelect('element-currency', element.id, element.currency || 'EUR', listToOptions(CURRENCIES)) + '</label>';
     if (isEdit && element.valueType === 'weight') html += '<label class="field">Einheit' + renderSelect('element-unit', element.id, element.unit || 'g', WEIGHT_UNITS) + '</label>';
+    if (isEdit && element.valueType === 'volume') html += '<label class="field">Einheit' + renderSelect('element-unit', element.id, element.unit || 'ml', VOLUME_UNITS) + '</label>';
     if (isEdit) html += '<label class="field"><span><input type="checkbox" data-field="element-stepper" data-id="' + attr(element.id) + '" ' + (element.stepper ? 'checked' : '') + ' /> Zähler-Optik</span></label>';
     return html;
   }
@@ -427,6 +437,7 @@
       html += '<label class="field checkbox-field"><span><input type="checkbox" data-field="formula-hide-name" data-id="' + attr(element.id) + '" ' + (element.hideName ? 'checked' : '') + ' /> Namen ausblenden</span></label>';
       if (element.valueType === 'currency') html += '<label class="field">Währung' + renderSelect('element-currency', element.id, element.currency || 'EUR', listToOptions(CURRENCIES)) + '</label>';
       if (element.valueType === 'weight') html += '<label class="field">Einheit' + renderSelect('element-unit', element.id, element.unit || 'g', WEIGHT_UNITS) + '</label>';
+      if (element.valueType === 'volume') html += '<label class="field">Einheit' + renderSelect('element-unit', element.id, element.unit || 'ml', VOLUME_UNITS) + '</label>';
       html += renderFormulaRefs(element);
       html += renderSourcePicker(element);
     } else {
@@ -497,7 +508,7 @@
 
   function renderDuplicatePrompt() {
     if (!state.duplicatePrompt) return '';
-    return '<div class="duplicate-popover" style="--dup-x:' + attr(state.duplicatePrompt.x) + 'px; --dup-y:' + attr(state.duplicatePrompt.y) + 'px"><button class="duplicate-button" data-action="confirm-duplicate">Duplizieren</button></div>';
+    return '<div class="duplicate-popover" style="--dup-x:' + attr(state.duplicatePrompt.x) + 'px; --dup-y:' + attr(state.duplicatePrompt.y) + 'px"><button class="duplicate-button" data-action="confirm-duplicate">Duplizieren</button><button class="duplicate-button duplicate-danger" data-action="confirm-delete-prompt">Löschen</button></div>';
   }
 
   function renderSheet() {
@@ -566,6 +577,11 @@
         state.suppressNextClick = false;
         return confirmDuplicate();
       }
+      if (action === 'confirm-delete-prompt') {
+        event.preventDefault();
+        state.suppressNextClick = false;
+        return confirmPromptDelete();
+      }
       if (state.suppressNextClick && Date.now() < state.suppressClickUntil && isDuplicateSourceClick(event.target)) {
         state.suppressNextClick = false;
         event.preventDefault();
@@ -599,7 +615,7 @@
     if (action === 'open-menu') return openSheet({ type: 'menu' });
     if (action === 'open-page-settings') return openSheet({ type: 'pageSettings' });
     if (action === 'close-sheet') return closeSheet();
-    if (action === 'add-section') return addSection();
+    if (action === 'add-section') return addSection(target.dataset.index);
     if (action === 'select-section') return selectSection(target.dataset.id);
     if (action === 'close-section-editor') return closeSectionEditor();
     if (action === 'toggle-section-colors') return toggleSectionColors(target.dataset.id);
@@ -663,8 +679,9 @@
     }
     touch(element);
     saveDocument();
-    if (field === 'element-text') resizeTextarea(target);
-    if (!target.closest('.fill-number-chip')) refreshElementChip(element);
+    if (field === 'element-text' && target.tagName === 'TEXTAREA') resizeTextarea(target);
+    if (field === 'element-text' && target.classList.contains('inline-text-chip')) target.classList.toggle('is-placeholder', !target.value);
+    if (!target.closest('.fill-number-chip') && !target.classList.contains('inline-text-chip')) refreshElementChip(element);
     refreshResults();
     renderSoonExceptTyping(field);
   }
@@ -680,7 +697,8 @@
     commitHistory(beforeChange);
     if (field === 'element-value-type') {
       element.valueType = target.value;
-      if (target.value === 'weight' && !element.unit) element.unit = 'g';
+      if (target.value === 'weight' && !WEIGHT_UNITS[element.unit]) element.unit = 'g';
+      if (target.value === 'volume' && !VOLUME_UNITS[element.unit]) element.unit = 'ml';
       if (target.value === 'currency' && !element.currency) element.currency = 'EUR';
       if (target.value === 'date' && typeof element.value === 'number') element.value = '';
       if (target.value !== 'date' && typeof element.value === 'string') element.value = parseNumber(element.value);
@@ -695,7 +713,8 @@
     }
     if (field === 'formula-value-type') {
       element.valueType = target.value;
-      if (target.value === 'weight' && !element.unit) element.unit = 'g';
+      if (target.value === 'weight' && !WEIGHT_UNITS[element.unit]) element.unit = 'g';
+      if (target.value === 'volume' && !VOLUME_UNITS[element.unit]) element.unit = 'ml';
       if (target.value === 'currency' && !element.currency) element.currency = 'EUR';
     }
     touch(element);
@@ -748,14 +767,17 @@
   function openSheet(sheet) { state.sheet = sheet; render(); }
   function closeSheet() { state.sheet = null; render(); }
 
-  function addSection() {
+  function addSection(index) {
     var page = currentPage();
     if (!page) return;
     commitHistory();
     state.sheet = null;
     var id = uid('section');
-    state.doc.sections[id] = stamp({ id: id, pageId: page.id, name: '', color: COLORS[page.sectionOrder.length % COLORS.length], elementOrder: [] });
-    page.sectionOrder.push(id);
+    var insertIndex = Number(index);
+    if (!Number.isFinite(insertIndex)) insertIndex = page.sectionOrder.length;
+    insertIndex = Math.max(0, Math.min(insertIndex, page.sectionOrder.length));
+    state.doc.sections[id] = stamp({ id: id, pageId: page.id, name: '', color: COLORS[insertIndex % COLORS.length], elementOrder: [] });
+    page.sectionOrder.splice(insertIndex, 0, id);
     touch(page);
     state.activeSectionId = id;
     state.modeByPage[page.id] = 'edit';
@@ -815,7 +837,7 @@
     section.elementOrder.push(element.id);
     touch(section);
     state.sheet = null;
-    state.activeElementId = element.id;
+    state.activeElementId = type === 'text' ? null : element.id;
     state.activeSectionId = null;
     saveDocument();
     render();
@@ -832,7 +854,7 @@
   function selectElement(id) {
     var element = state.doc.elements[id];
     if (!element) return;
-    if (getPageMode(currentPage()) === 'fill' && element.type === 'text') return;
+    if (element.type === 'text') return;
     state.activeElementId = state.activeElementId === id ? null : id;
     state.activeSectionId = null;
     render();
@@ -847,7 +869,7 @@
     if (deps.length) {
       var names = deps.map(function (item) { return item.name || 'Formel'; }).join(', ');
       if (!window.confirm('Dieses Element wird verlinkt: ' + names + '. Trotzdem löschen?')) return;
-    }
+    } else if (!window.confirm('Element löschen?')) return;
     commitHistory();
     var section = getSection(element.sectionId);
     var index = section ? section.elementOrder.indexOf(id) : -1;
@@ -1043,7 +1065,7 @@
     if (event.button && event.button !== 0) return;
     if (getPageMode(currentPage()) !== 'edit') return;
     if (state.duplicatePrompt) return;
-    if (isInput(event.target) || event.target.closest('.mini-button, .round-plus, .line-plus-button, .color-chip, .element-popover, .section-editor')) return;
+    if ((isInput(event.target) && !event.target.classList.contains('inline-text-chip')) || event.target.closest('.mini-button, .round-plus, .line-plus-button, .color-chip, .element-popover, .section-editor')) return;
     var chip = event.target.closest('[data-element-id]');
     var sectionNode = event.target.closest('.calc-section');
     var sectionControl = event.target.closest('.section-title, .section-rail') || (!chip && sectionNode ? sectionNode : null);
@@ -1291,6 +1313,21 @@
     if (prompt.kind === 'section') return copySection(prompt.sectionId);
   }
 
+  function confirmPromptDelete() {
+    var prompt = state.duplicatePrompt;
+    if (!prompt) return;
+    state.duplicatePrompt = null;
+    state.suppressNextClick = false;
+    if (prompt.kind === 'element') {
+      deleteElement(prompt.elementId);
+      return render();
+    }
+    if (prompt.kind === 'section') {
+      deleteSection(prompt.sectionId);
+      return render();
+    }
+  }
+
   function moveElement(elementId, targetSectionId, targetIndex) {
     var element = state.doc.elements[elementId];
     var source = element && getSection(element.sectionId);
@@ -1519,8 +1556,14 @@
     if (!Number.isFinite(n)) n = 0;
     if (element.valueType === 'currency') return new Intl.NumberFormat('de-DE', { style: 'currency', currency: element.currency || 'EUR' }).format(n);
     if (element.valueType === 'percent') return new Intl.NumberFormat('de-DE', { maximumFractionDigits: 2 }).format(n) + '%';
-    if (element.valueType === 'weight') return new Intl.NumberFormat('de-DE', { maximumFractionDigits: 2 }).format(n) + (element.unit || 'g');
+    if (element.valueType === 'weight' || element.valueType === 'volume') return new Intl.NumberFormat('de-DE', { maximumFractionDigits: 2 }).format(n) + unitLabel(element);
     return new Intl.NumberFormat('de-DE', { maximumFractionDigits: 4 }).format(n);
+  }
+
+  function unitLabel(element) {
+    if (element.valueType === 'weight') return WEIGHT_UNITS[element.unit] || element.unit || 'g';
+    if (element.valueType === 'volume') return VOLUME_UNITS[element.unit] || element.unit || 'ml';
+    return element.unit || '';
   }
 
   function formulaDescription(element) {
