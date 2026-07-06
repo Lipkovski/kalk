@@ -5,8 +5,11 @@
   var COLORS = ['#F2A65A', '#F1C27D', '#E8B4A0', '#D99CA3', '#C7B7E8', '#AFC4E9', '#9FC9D5', '#A8DADC', '#BFD7B5', '#D6E3A3', '#F0D98C', '#F3B6A2', '#C9ADA7', '#B7B7A4', '#D8C3A5', '#B5C7A8', '#A6C8B3', '#A7C7E7', '#D3C0E8', '#E7A6B3'];
   var EMOJIS = ['🍕', '🥐', '🍰', '☕', '🧾', '💶', '🧮', '📦', '🛒', '🏷️', '📋', '✨', '🔧', '🏠', '🌿', '🍋'];
   var CURRENCIES = ['EUR', 'USD', 'CHF', 'GBP'];
+  var CURRENCY_LABELS = { EUR: 'Euro', USD: 'US-Dollar', CHF: 'Schweizer Franken', GBP: 'Britisches Pfund' };
   var WEIGHT_UNITS = { mg: 'mg', g: 'g', kg: 'kg', t: 't', oz: 'oz', lb: 'lb' };
+  var WEIGHT_UNIT_LABELS = { mg: 'Milligramm', g: 'Gramm', kg: 'Kilogramm', t: 'Tonne', oz: 'Unze', lb: 'Pfund' };
   var VOLUME_UNITS = { ml: 'ml', cl: 'cl', dl: 'dl', l: 'l', tsp: 'TL', tbsp: 'EL', cup: 'Cup', floz: 'fl oz', pcs: 'Stk', pinch: 'Prise' };
+  var VOLUME_UNIT_LABELS = { ml: 'Milliliter', cl: 'Zentiliter', dl: 'Deziliter', l: 'Liter', tsp: 'Teelöffel', tbsp: 'Esslöffel', cup: 'Tasse', floz: 'Flüssigunze', pcs: 'Stück', pinch: 'Prise' };
   var VALUE_TYPES = { number: 'Zahl', currency: 'Währung', weight: 'Gewicht', volume: 'Menge', percent: 'Prozent', date: 'Datum' };
   var FORMULA_VALUE_TYPES = { number: 'Zahl', currency: 'Währung', weight: 'Gewicht', volume: 'Menge', percent: 'Prozent' };
   var ELEMENT_TYPES = { text: 'Text', number: 'Zahl', formula: 'Formel' };
@@ -29,6 +32,7 @@
     modeByPage: {},
     sheet: null,
     activeElementId: null,
+    pendingTextFocusId: null,
     activeSectionId: null,
     activeSectionColorId: null,
     activeInput: false,
@@ -249,6 +253,7 @@
     app.innerHTML = (state.currentPageId ? renderPage() : renderHome()) + renderDuplicatePrompt() + renderToolbar() + renderSheet() + renderToast();
     resizeTextareas();
     refreshResults();
+    focusPendingTextInput();
     syncToolbarClass();
   }
 
@@ -269,7 +274,7 @@
   function renderFolder(folder) {
     var pages = activePages().filter(function (page) { return page.folderId === folder.id; }).sort(bySortIndex);
     var html = '<section class="folder">';
-    html += '<div class="folder-head"><button class="folder-toggle" data-action="toggle-folder" data-id="' + attr(folder.id) + '" title="Ordner öffnen">' + (folder.isOpen ? '⌄' : '›') + '</button><input class="folder-name-input" data-field="folder-name" data-id="' + attr(folder.id) + '" value="' + attr(folder.name || '') + '" placeholder="Neuer Ordner" /></div>';
+    html += '<div class="folder-head" data-folder-id="' + attr(folder.id) + '"><button class="folder-toggle" data-action="toggle-folder" data-id="' + attr(folder.id) + '" title="Ordner öffnen">' + (folder.isOpen ? '⌄' : '›') + '</button><input class="folder-name-input" data-field="folder-name" data-id="' + attr(folder.id) + '" value="' + attr(folder.name || '') + '" placeholder="Neuer Ordner" /></div>';
     if (folder.isOpen) {
       html += '<div class="page-list">';
       pages.forEach(function (page) { html += renderPageRow(page); });
@@ -282,7 +287,7 @@
   }
 
   function renderPageRow(page) {
-    return '<button class="page-row" style="--page-color:' + attr(page.color || COLORS[0]) + '" data-action="open-page" data-id="' + attr(page.id) + '"><span class="page-icon">' + esc(page.icon || '📄') + '</span><span class="page-row-title ' + (!page.name ? 'is-placeholder' : '') + '">' + esc(page.name || 'Neue Seite') + '</span><span class="chevron">›</span></button>';
+    return '<button class="page-row" style="--page-color:' + attr(page.color || COLORS[0]) + '" data-action="open-page" data-id="' + attr(page.id) + '" data-page-id="' + attr(page.id) + '"><span class="page-icon">' + esc(page.icon || '📄') + '</span><span class="page-row-title ' + (!page.name ? 'is-placeholder' : '') + '">' + esc(page.name || 'Neue Seite') + '</span><span class="chevron">›</span></button>';
   }
 
   function renderLinePlus(action, id, title, extraClass, index) {
@@ -348,7 +353,7 @@
   }
 
   function renderSectionEditor(section) {
-    var html = '<div class="section-editor"><div class="section-editor-head"><button class="danger-button section-delete-button" data-action="delete-section" data-id="' + attr(section.id) + '">Bereich löschen</button><input class="section-title-input" data-field="section-name" data-id="' + attr(section.id) + '" value="' + attr(section.name || '') + '" placeholder="Neuer Bereich" /><div class="editor-actions"><button class="color-chip" style="--swatch:' + attr(section.color || COLORS[0]) + '" data-action="toggle-section-colors" data-id="' + attr(section.id) + '" title="Farbe"></button><button class="mini-button" data-action="close-section-editor">×</button></div></div>';
+    var html = '<div class="section-editor"><div class="section-editor-head"><input class="section-title-input" data-field="section-name" data-id="' + attr(section.id) + '" value="' + attr(section.name || '') + '" placeholder="Neuer Bereich" /><div class="editor-actions"><button class="color-chip" style="--swatch:' + attr(section.color || COLORS[0]) + '" data-action="toggle-section-colors" data-id="' + attr(section.id) + '" title="Farbe"></button><button class="mini-button" data-action="close-section-editor">×</button></div></div><button class="danger-button section-delete-button" data-action="delete-section" data-id="' + attr(section.id) + '">Bereich löschen</button>';
     if (state.activeSectionColorId === section.id) html += renderSwatches('set-section-color', section.id, section.color);
 
     html += '</div>';
@@ -369,7 +374,7 @@
     var label = elementLabel(element);
     var cls = 'element-chip ' + element.type + '-chip ' + (state.activeElementId === element.id ? 'is-active' : '') + (state.drag && state.drag.elementId === element.id ? ' is-dragging' : '');
     if (!isEdit && element.type === 'number') return renderFillNumberChip(element, cls);
-    if (isEdit && element.type === 'text') return '<input class="' + cls + ' inline-text-chip ' + (!element.text ? 'is-placeholder' : '') + '" data-field="element-text" data-id="' + attr(element.id) + '" data-element-id="' + attr(element.id) + '" type="text" value="' + attr(element.text || '') + '" placeholder="Text" />';
+    if (isEdit && element.type === 'text') return '<textarea class="' + cls + ' inline-text-chip ' + (!element.text ? 'is-placeholder' : '') + '" data-field="element-text" data-id="' + attr(element.id) + '" data-element-id="' + attr(element.id) + '" rows="1" wrap="soft" placeholder="Text">' + esc(element.text || '') + '</textarea>';
     var html = '<button class="' + cls + (element.type === 'text' && !element.text ? ' is-placeholder' : '') + '" data-action="select-element" data-id="' + attr(element.id) + '" data-element-id="' + attr(element.id) + '">';
     if (element.type === 'number' && element.stepper) {
       html += '<span>' + esc(label) + '</span><span class="stepper"><span>▴</span><span>▾</span></span>';
@@ -421,9 +426,9 @@
     html += '<div class="grid-two"><label class="field">Wert<input class="input" data-field="element-value" data-id="' + attr(element.id) + '" type="' + (element.valueType === 'date' ? 'date' : 'number') + '" step="any" inputmode="decimal" value="' + attr(element.value || element.value === 0 ? element.value : '') + '" /></label>';
     if (isEdit) html += '<label class="field">Format' + renderSelect('element-value-type', element.id, element.valueType || 'number', VALUE_TYPES) + '</label>';
     html += '</div>';
-    if (isEdit && element.valueType === 'currency') html += '<label class="field">Währung' + renderSelect('element-currency', element.id, element.currency || 'EUR', listToOptions(CURRENCIES)) + '</label>';
-    if (isEdit && element.valueType === 'weight') html += '<label class="field">Einheit' + renderSelect('element-unit', element.id, element.unit || 'g', WEIGHT_UNITS) + '</label>';
-    if (isEdit && element.valueType === 'volume') html += '<label class="field">Einheit' + renderSelect('element-unit', element.id, element.unit || 'ml', VOLUME_UNITS) + '</label>';
+    if (isEdit && element.valueType === 'currency') html += '<label class="field">Währung' + renderCompactSelect('element-currency', element.id, element.currency || 'EUR', CURRENCY_LABELS, listToOptions(CURRENCIES)) + '</label>';
+    if (isEdit && element.valueType === 'weight') html += '<label class="field">Einheit' + renderCompactSelect('element-unit', element.id, element.unit || 'g', WEIGHT_UNIT_LABELS, WEIGHT_UNITS) + '</label>';
+    if (isEdit && element.valueType === 'volume') html += '<label class="field">Einheit' + renderCompactSelect('element-unit', element.id, element.unit || 'ml', VOLUME_UNIT_LABELS, VOLUME_UNITS) + '</label>';
     if (isEdit) html += '<label class="field"><span><input type="checkbox" data-field="element-stepper" data-id="' + attr(element.id) + '" ' + (element.stepper ? 'checked' : '') + ' /> Zähler-Optik</span></label>';
     return html;
   }
@@ -435,9 +440,9 @@
     if (isEdit) {
       html += '<div class="grid-two"><label class="field">Rechnung' + renderSelect('formula-operator', element.id, element.formula.operator || 'chain', FORMULA_MODES) + '</label><label class="field">Format' + renderSelect('formula-value-type', element.id, element.valueType || 'number', FORMULA_VALUE_TYPES) + '</label></div>';
       html += '<label class="field checkbox-field"><span><input type="checkbox" data-field="formula-hide-name" data-id="' + attr(element.id) + '" ' + (element.hideName ? 'checked' : '') + ' /> Namen ausblenden</span></label>';
-      if (element.valueType === 'currency') html += '<label class="field">Währung' + renderSelect('element-currency', element.id, element.currency || 'EUR', listToOptions(CURRENCIES)) + '</label>';
-      if (element.valueType === 'weight') html += '<label class="field">Einheit' + renderSelect('element-unit', element.id, element.unit || 'g', WEIGHT_UNITS) + '</label>';
-      if (element.valueType === 'volume') html += '<label class="field">Einheit' + renderSelect('element-unit', element.id, element.unit || 'ml', VOLUME_UNITS) + '</label>';
+      if (element.valueType === 'currency') html += '<label class="field">Währung' + renderCompactSelect('element-currency', element.id, element.currency || 'EUR', CURRENCY_LABELS, listToOptions(CURRENCIES)) + '</label>';
+      if (element.valueType === 'weight') html += '<label class="field">Einheit' + renderCompactSelect('element-unit', element.id, element.unit || 'g', WEIGHT_UNIT_LABELS, WEIGHT_UNITS) + '</label>';
+      if (element.valueType === 'volume') html += '<label class="field">Einheit' + renderCompactSelect('element-unit', element.id, element.unit || 'ml', VOLUME_UNIT_LABELS, VOLUME_UNITS) + '</label>';
       html += renderFormulaRefs(element);
       html += renderSourcePicker(element);
     } else {
@@ -508,7 +513,7 @@
 
   function renderDuplicatePrompt() {
     if (!state.duplicatePrompt) return '';
-    return '<div class="duplicate-popover" style="--dup-x:' + attr(state.duplicatePrompt.x) + 'px; --dup-y:' + attr(state.duplicatePrompt.y) + 'px"><button class="duplicate-button" data-action="confirm-duplicate">Duplizieren</button><button class="duplicate-button duplicate-danger" data-action="confirm-delete-prompt">Löschen</button></div>';
+    return '<div class="duplicate-popover" role="menu" aria-label="Aktionen" style="--dup-x:' + attr(state.duplicatePrompt.x) + 'px; --dup-y:' + attr(state.duplicatePrompt.y) + 'px"><button class="duplicate-button" role="menuitem" data-action="confirm-duplicate"><span class="duplicate-icon">⧉</span><span>Duplizieren</span></button><button class="duplicate-button duplicate-danger" role="menuitem" data-action="confirm-delete-prompt"><span class="duplicate-icon">×</span><span>Löschen</span></button></div>';
   }
 
   function renderSheet() {
@@ -561,11 +566,16 @@
     return html;
   }
 
-  function renderSelect(field, id, selected, options) {
-    var html = '<select class="select" data-field="' + attr(field) + '" data-id="' + attr(id) + '">';
+  function renderSelect(field, id, selected, options, className) {
+    var html = '<select class="select' + (className ? ' ' + attr(className) : '') + '" data-field="' + attr(field) + '" data-id="' + attr(id) + '">';
     Object.keys(options).forEach(function (value) { html += '<option value="' + attr(value) + '" ' + (value === selected ? 'selected' : '') + '>' + esc(options[value]) + '</option>'; });
     html += '</select>';
     return html;
+  }
+
+  function renderCompactSelect(field, id, selected, options, shortOptions) {
+    var shortLabel = shortOptions[selected] || selected;
+    return '<span class="compact-select">' + renderSelect(field, id, selected, options, 'compact-select-control') + '<span class="compact-select-value">' + esc(shortLabel) + '</span></span>';
   }
 
   function handleClick(event) {
@@ -650,11 +660,19 @@
       var sectionNode = target.closest('.calc-section');
       return !!(sectionNode && sectionNode.dataset.sectionId === prompt.sectionId);
     }
+    if (prompt.kind === 'page') {
+      var pageNode = target.closest('.page-row');
+      return !!(pageNode && pageNode.dataset.pageId === prompt.pageId);
+    }
+    if (prompt.kind === 'folder') {
+      var folderNode = target.closest('.folder-head');
+      return !!(folderNode && folderNode.dataset.folderId === prompt.folderId);
+    }
     return false;
   }
 
   function handleContextMenu(event) {
-    if (event.target.closest('[data-element-id], .section-title, .section-rail, .calc-section')) event.preventDefault();
+    if (event.target.closest('[data-element-id], .section-title, .section-rail, .calc-section, .page-row, .folder-head')) event.preventDefault();
   }
 
   function handleSelectStart(event) {
@@ -727,6 +745,27 @@
     if (field === 'element-text') return;
     if (field === 'element-name') return;
     if (field === 'element-unit') return;
+  }
+
+  function focusPendingTextInput() {
+    var id = state.pendingTextFocusId;
+    if (!id) return;
+    state.pendingTextFocusId = null;
+    var inputs = app.querySelectorAll('.inline-text-chip[data-field="element-text"]');
+    var input = null;
+    for (var i = 0; i < inputs.length; i += 1) {
+      if (inputs[i].dataset.id === id) {
+        input = inputs[i];
+        break;
+      }
+    }
+    if (!input) return;
+    try {
+      input.focus({ preventScroll: true });
+    } catch (error) {
+      input.focus();
+    }
+    if (input.setSelectionRange) input.setSelectionRange(input.value.length, input.value.length);
   }
 
   function addFolder() {
@@ -838,6 +877,7 @@
     touch(section);
     state.sheet = null;
     state.activeElementId = type === 'text' ? null : element.id;
+    state.pendingTextFocusId = type === 'text' ? element.id : null;
     state.activeSectionId = null;
     saveDocument();
     render();
@@ -943,18 +983,79 @@
   function deletePage() {
     var page = currentPage();
     if (!page) return;
-    var used = [];
-    pageSections(page).forEach(function (section) { section.elementOrder.forEach(function (elementId) { getDependents(elementId).forEach(function (dep) { if (dep.pageId !== page.id) used.push(dep.name || 'Formel'); }); }); });
+    deletePageById(page.id);
+  }
+
+  function deletePageById(pageId) {
+    var page = getPage(pageId);
+    if (!page || page.deletedAt) return render();
+    var used = externalDependentsForPages([page]);
     var message = used.length ? 'Seite wird extern verlinkt: ' + used.join(', ') + '. Trotzdem löschen?' : 'Seite löschen?';
-    if (!window.confirm(message)) return;
+    if (!window.confirm(message)) return render();
     commitHistory();
-    page.deletedAt = now();
-    touch(page);
-    pageSections(page).forEach(function (section) { section.deletedAt = now(); touch(section); section.elementOrder.forEach(function (id) { if (state.doc.elements[id]) { state.doc.elements[id].deletedAt = now(); touch(state.doc.elements[id]); } }); });
-    state.currentPageId = null;
+    softDeletePage(page);
+    if (state.currentPageId === page.id) state.currentPageId = null;
     state.sheet = null;
+    state.activeElementId = null;
+    state.activeSectionId = null;
+    state.activeSectionColorId = null;
     saveDocument();
     render();
+  }
+
+  function deleteFolder(folderId) {
+    var folder = getFolder(folderId);
+    if (!folder || folder.deletedAt) return render();
+    var pages = activePages().filter(function (page) { return page.folderId === folder.id; });
+    var used = externalDependentsForPages(pages);
+    var message = used.length ? 'Ordner wird extern verlinkt: ' + used.join(', ') + '. Trotzdem löschen?' : (pages.length ? 'Ordner und Seiten löschen?' : 'Ordner löschen?');
+    if (!window.confirm(message)) return render();
+    commitHistory();
+    folder.deletedAt = now();
+    touch(folder);
+    pages.forEach(function (page) {
+      softDeletePage(page);
+      if (state.currentPageId === page.id) state.currentPageId = null;
+    });
+    state.sheet = null;
+    state.activeElementId = null;
+    state.activeSectionId = null;
+    state.activeSectionColorId = null;
+    saveDocument();
+    render();
+  }
+
+  function softDeletePage(page) {
+    page.deletedAt = now();
+    touch(page);
+    pageSections(page).forEach(function (section) {
+      section.deletedAt = now();
+      touch(section);
+      section.elementOrder.forEach(function (id) {
+        if (state.doc.elements[id]) {
+          state.doc.elements[id].deletedAt = now();
+          touch(state.doc.elements[id]);
+        }
+      });
+    });
+  }
+
+  function externalDependentsForPages(pages) {
+    var pageIds = pages.map(function (page) { return page.id; });
+    var names = [];
+    var seen = {};
+    pages.forEach(function (page) {
+      pageSections(page).forEach(function (section) {
+        section.elementOrder.forEach(function (elementId) {
+          getDependents(elementId).forEach(function (dep) {
+            if (pageIds.indexOf(dep.pageId) !== -1 || seen[dep.id]) return;
+            seen[dep.id] = true;
+            names.push(dep.name || 'Formel');
+          });
+        });
+      });
+    });
+    return names;
   }
 
   function setPageEmoji(emoji) { var page = currentPage(); if (!page) return; commitHistory(); page.icon = emoji; touch(page); saveDocument(); render(); }
@@ -1023,7 +1124,11 @@
   function restoreDocument(snapshot) {
     try {
       state.history.isRestoring = true;
-      state.doc = normalizeDocument(JSON.parse(snapshot));
+      var currentTheme = state.doc && state.doc.settings ? state.doc.settings.theme : null;
+      var restored = normalizeDocument(JSON.parse(snapshot));
+      restored.settings = restored.settings || {};
+      if (currentTheme) restored.settings.theme = currentTheme;
+      state.doc = restored;
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state.doc));
       if (state.currentPageId && !getPage(state.currentPageId)) state.currentPageId = null;
       state.sheet = null;
@@ -1063,8 +1168,10 @@
 
   function handlePointerDown(event) {
     if (event.button && event.button !== 0) return;
-    if (getPageMode(currentPage()) !== 'edit') return;
     if (state.duplicatePrompt) return;
+    var page = currentPage();
+    if (!page) return handleHomePointerDown(event);
+    if (getPageMode(page) !== 'edit') return;
     if ((isInput(event.target) && !event.target.classList.contains('inline-text-chip')) || event.target.closest('.mini-button, .round-plus, .line-plus-button, .color-chip, .element-popover, .section-editor')) return;
     var chip = event.target.closest('[data-element-id]');
     var sectionNode = event.target.closest('.calc-section');
@@ -1091,7 +1198,44 @@
       lastY: event.clientY,
       overSectionId: element ? element.sectionId : (section ? section.id : null),
       overIndex: 0,
-      overSectionIndex: section ? pageSections(currentPage()).filter(function (item) { return item.id !== section.id; }).length : 0,
+      overSectionIndex: section ? pageSections(page).filter(function (item) { return item.id !== section.id; }).length : 0,
+      timer: window.setTimeout(function () {
+        markLongPress();
+      }, 420)
+    };
+    document.addEventListener('pointermove', handlePointerMove);
+    document.addEventListener('pointerup', handlePointerUp);
+    document.addEventListener('pointercancel', handlePointerUp);
+  }
+
+  function handleHomePointerDown(event) {
+    if (state.sheet || event.target.closest('.line-plus-button, .icon-button, .duplicate-popover')) return;
+    var pageNode = event.target.closest('.page-row');
+    var folderNode = pageNode ? null : event.target.closest('.folder-head');
+    var kind = pageNode ? 'page' : (folderNode ? 'folder' : null);
+    if (!kind) return;
+    var pageId = pageNode ? pageNode.dataset.pageId : null;
+    var folderId = folderNode ? folderNode.dataset.folderId : null;
+    if (kind === 'page' && !getPage(pageId)) return;
+    if (kind === 'folder' && !getFolder(folderId)) return;
+    clearDragTimer();
+    state.drag = {
+      kind: kind,
+      pending: true,
+      dragging: false,
+      longPressed: false,
+      copied: false,
+      elementId: null,
+      sectionId: null,
+      pageId: pageId,
+      folderId: folderId,
+      startX: event.clientX,
+      startY: event.clientY,
+      lastX: event.clientX,
+      lastY: event.clientY,
+      overSectionId: null,
+      overIndex: 0,
+      overSectionIndex: 0,
       timer: window.setTimeout(function () {
         markLongPress();
       }, 420)
@@ -1130,6 +1274,8 @@
     var targetSectionIndex = state.drag.overSectionIndex;
     var elementId = state.drag.elementId;
     var sectionId = state.drag.sectionId;
+    var pageId = state.drag.pageId;
+    var folderId = state.drag.folderId;
     clearDragTimer();
     removeDragListeners();
     stopAutoScroll();
@@ -1144,7 +1290,7 @@
     } else if (wasLongPressed) {
       state.suppressNextClick = true;
       state.suppressClickUntil = Date.now() + 550;
-      openDuplicatePrompt(kind, elementId, sectionId, state.dragPointX || 0, state.dragPointY || 0);
+      openDuplicatePrompt(kind, elementId, sectionId, state.dragPointX || 0, state.dragPointY || 0, pageId, folderId);
     } else {
       return;
     }
@@ -1291,13 +1437,15 @@
     return { index: index };
   }
 
-  function openDuplicatePrompt(kind, elementId, sectionId, x, y) {
+  function openDuplicatePrompt(kind, elementId, sectionId, x, y, pageId, folderId) {
     var width = window.innerWidth || 390;
     var height = window.innerHeight || 844;
     state.duplicatePrompt = {
       kind: kind,
       elementId: elementId || null,
       sectionId: sectionId || null,
+      pageId: pageId || null,
+      folderId: folderId || null,
       x: Math.min(Math.max(82, x), Math.max(82, width - 82)),
       y: Math.min(Math.max(82, y - 12), Math.max(82, height - 72))
     };
@@ -1311,6 +1459,9 @@
     state.suppressNextClick = false;
     if (prompt.kind === 'element') return copyElement(prompt.elementId);
     if (prompt.kind === 'section') return copySection(prompt.sectionId);
+    if (prompt.kind === 'page') return copyPage(prompt.pageId);
+    if (prompt.kind === 'folder') return copyFolder(prompt.folderId);
+    render();
   }
 
   function confirmPromptDelete() {
@@ -1326,6 +1477,9 @@
       deleteSection(prompt.sectionId);
       return render();
     }
+    if (prompt.kind === 'page') return deletePageById(prompt.pageId);
+    if (prompt.kind === 'folder') return deleteFolder(prompt.folderId);
+    render();
   }
 
   function moveElement(elementId, targetSectionId, targetIndex) {
@@ -1362,7 +1516,8 @@
     nextOrder.splice(targetIndex, 0, sectionId);
     page.sectionOrder = nextOrder;
     touch(page);
-    state.activeSectionId = sectionId;
+    state.activeSectionId = null;
+    state.activeSectionColorId = null;
     state.activeElementId = null;
     saveDocument();
     render();
@@ -1429,6 +1584,157 @@
     saveDocument();
     showToast('Bereich kopiert');
     render();
+  }
+
+  function copyPage(pageId) {
+    var page = getPage(pageId);
+    if (!page || page.deletedAt) return render();
+    commitHistory();
+    clonePages([page], page.folderId || null, {
+      pageNameSuffix: true,
+      sortIndexFor: function () { return sortIndexAfterPage(page); }
+    });
+    state.currentPageId = null;
+    state.sheet = null;
+    state.activeElementId = null;
+    state.activeSectionId = null;
+    state.activeSectionColorId = null;
+    saveDocument();
+    showToast('Seite kopiert');
+    render();
+  }
+
+  function copyFolder(folderId) {
+    var folder = getFolder(folderId);
+    if (!folder || folder.deletedAt) return render();
+    commitHistory();
+    var newFolderId = uid('folder');
+    state.doc.folders.push(stamp({
+      id: newFolderId,
+      name: folder.name ? folder.name + ' Kopie' : '',
+      isOpen: true,
+      sortIndex: sortIndexAfterFolder(folder)
+    }));
+    var pages = activePages().filter(function (page) { return page.folderId === folder.id; }).sort(bySortIndex);
+    clonePages(pages, newFolderId, {
+      pageNameSuffix: false,
+      sortIndexFor: function (page, index) { return index; }
+    });
+    state.currentPageId = null;
+    state.sheet = null;
+    state.activeElementId = null;
+    state.activeSectionId = null;
+    state.activeSectionColorId = null;
+    saveDocument();
+    showToast('Ordner kopiert');
+    render();
+  }
+
+  function clonePages(sourcePages, folderId, options) {
+    var pageMap = {};
+    var sectionMap = {};
+    var elementMap = {};
+    var elementPageMap = {};
+    var pageCopies = [];
+    options = options || {};
+    sourcePages.filter(notDeleted).forEach(function (page, pageIndex) {
+      var newPageId = uid('page');
+      var sections = pageSections(page);
+      var sectionOrder = sections.map(function (section) {
+        var newSectionId = uid('section');
+        sectionMap[section.id] = newSectionId;
+        return newSectionId;
+      });
+      pageMap[page.id] = newPageId;
+      var newPage = stamp({
+        id: newPageId,
+        folderId: folderId || null,
+        name: page.name && options.pageNameSuffix ? page.name + ' Kopie' : page.name || '',
+        icon: page.icon,
+        color: page.color,
+        sortIndex: options.sortIndexFor ? options.sortIndexFor(page, pageIndex) : activePages().length + pageIndex,
+        sectionOrder: sectionOrder
+      });
+      state.doc.pages.push(newPage);
+      pageCopies.push({ source: page, clone: newPage, sections: sections });
+      sections.forEach(function (section) {
+        (section.elementOrder || []).forEach(function (elementId) {
+          var element = state.doc.elements[elementId];
+          if (!element || element.deletedAt) return;
+          elementMap[elementId] = uid('element');
+          elementPageMap[elementId] = newPageId;
+        });
+      });
+    });
+
+    pageCopies.forEach(function (pageCopy) {
+      pageCopy.sections.forEach(function (section) {
+        var newSectionId = sectionMap[section.id];
+        var newElementOrder = (section.elementOrder || []).filter(function (elementId) {
+          return !!elementMap[elementId];
+        }).map(function (elementId) {
+          return elementMap[elementId];
+        });
+        state.doc.sections[newSectionId] = stamp({
+          id: newSectionId,
+          pageId: pageCopy.clone.id,
+          name: section.name || '',
+          color: section.color,
+          elementOrder: newElementOrder
+        });
+        (section.elementOrder || []).forEach(function (elementId) {
+          var element = state.doc.elements[elementId];
+          if (!element || element.deletedAt) return;
+          var clone = cloneElement(element, pageCopy.clone.id, newSectionId, elementMap[elementId]);
+          remapClonedFormulaRefs(clone, elementMap, elementPageMap);
+          state.doc.elements[clone.id] = clone;
+        });
+      });
+    });
+    return pageCopies.map(function (pageCopy) { return pageCopy.clone; });
+  }
+
+  function remapClonedFormulaRefs(element, elementMap, elementPageMap) {
+    if (element.type !== 'formula' || !element.formula || !element.formula.inputs) return;
+    element.formula.inputs = element.formula.inputs.map(function (ref) {
+      if (!elementMap[ref.elementId]) return ref;
+      return Object.assign({}, ref, {
+        pageId: elementPageMap[ref.elementId],
+        elementId: elementMap[ref.elementId]
+      });
+    });
+  }
+
+  function sortIndexAfterPage(page) {
+    var pages = activePages().filter(function (item) { return item.folderId === page.folderId; }).sort(bySortIndex);
+    var index = pages.indexOf(page);
+    var current = numericSortIndex(page, index);
+    var next = pages[index + 1];
+    if (next) {
+      var nextSort = numericSortIndex(next, current + 1);
+      if (nextSort > current) return current + (nextSort - current) / 2;
+    }
+    return pages.reduce(function (max, item, itemIndex) {
+      return Math.max(max, numericSortIndex(item, itemIndex));
+    }, current) + 1;
+  }
+
+  function sortIndexAfterFolder(folder) {
+    var folders = activeFolders().sort(bySortIndex);
+    var index = folders.indexOf(folder);
+    var current = numericSortIndex(folder, index);
+    var next = folders[index + 1];
+    if (next) {
+      var nextSort = numericSortIndex(next, current + 1);
+      if (nextSort > current) return current + (nextSort - current) / 2;
+    }
+    return folders.reduce(function (max, item, itemIndex) {
+      return Math.max(max, numericSortIndex(item, itemIndex));
+    }, current) + 1;
+  }
+
+  function numericSortIndex(item, fallback) {
+    return Number.isFinite(item && item.sortIndex) ? item.sortIndex : fallback;
   }
 
   function cloneElement(element, pageId, sectionId, forcedId) {
@@ -1640,7 +1946,47 @@
   function notDeleted(item) { return item && !item.deletedAt; }
 
   function resizeTextareas() { app.querySelectorAll('textarea').forEach(resizeTextarea); }
-  function resizeTextarea(textarea) { textarea.style.height = 'auto'; textarea.style.height = Math.max(74, textarea.scrollHeight) + 'px'; }
+  function resizeTextarea(textarea) {
+    if (textarea.classList.contains('inline-text-chip')) return resizeInlineTextChip(textarea);
+    textarea.style.height = 'auto';
+    textarea.style.height = Math.max(74, textarea.scrollHeight) + 'px';
+  }
+
+  function resizeInlineTextChip(textarea) {
+    var container = textarea.closest('.section-elements');
+    var fallbackWidth = Math.max(58, window.innerWidth - 48);
+    var maxWidth = Math.max(58, Math.floor((container && container.clientWidth) || fallbackWidth));
+    textarea.style.width = Math.min(maxWidth, Math.max(58, measureInlineTextWidth(textarea))) + 'px';
+    textarea.style.height = 'auto';
+    textarea.style.height = Math.max(36, textarea.scrollHeight) + 'px';
+  }
+
+  function measureInlineTextWidth(textarea) {
+    var node = measureInlineTextWidth.node;
+    if (!node) {
+      node = document.createElement('span');
+      node.style.position = 'fixed';
+      node.style.left = '-9999px';
+      node.style.top = '-9999px';
+      node.style.visibility = 'hidden';
+      node.style.whiteSpace = 'pre';
+      document.body.appendChild(node);
+      measureInlineTextWidth.node = node;
+    }
+    var style = window.getComputedStyle(textarea);
+    node.style.fontFamily = style.fontFamily;
+    node.style.fontSize = style.fontSize;
+    node.style.fontWeight = style.fontWeight;
+    node.style.letterSpacing = style.letterSpacing;
+    var text = textarea.value || textarea.getAttribute('placeholder') || '';
+    var longestLine = String(text).split(/\r?\n/).reduce(function (longest, line) {
+      return line.length > longest.length ? line : longest;
+    }, '');
+    node.textContent = longestLine || 'Text';
+    return Math.ceil(node.getBoundingClientRect().width + numericStyle(style.paddingLeft) + numericStyle(style.paddingRight) + numericStyle(style.borderLeftWidth) + numericStyle(style.borderRightWidth) + 4);
+  }
+
+  function numericStyle(value) { return parseFloat(value) || 0; }
   function syncToolbarClass() { var toolbar = app.querySelector('.keyboard-toolbar'); if (!toolbar) return; var page = currentPage(); toolbar.classList.toggle('is-visible', !!page && (state.activeInput || getPageMode(page) === 'edit' || !!state.sheet)); }
   function isInput(el) { return !!el && !!el.matches && el.matches('input, textarea, select'); }
   function listToOptions(list) { var out = {}; list.forEach(function (item) { out[item] = item; }); return out; }
